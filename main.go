@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 
 	"net/http"
+	"os"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -13,8 +14,13 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+	screp "github.com/icza/screp/rep"
+	"github.com/icza/screp/repparser"
 	"github.com/innerspirit/getscprocess/lib"
 )
+
+var userHome, _ = os.UserHomeDir()
+var repPath = userHome + "\\Documents\\StarCraft\\Maps\\Replays"
 
 func main() {
 	myApp := app.New()
@@ -42,14 +48,13 @@ func main() {
 	myWindow.SetContent(container.NewMax(canvas.NewRectangle(bgColor), container.NewMax(myTable), errorLabel))
 	myWindow.Resize(fyne.NewSize(400, 400))
 
-	opponent := "ZAELOT"
-
 	dataChannel := make(chan [][]string)
 	errorChannel := make(chan error)
 
 	go func() {
 		for {
-			newData, err := grabPlayerInfo(opponent)
+			repdata := getReplayData(repPath + "\\LastReplay.rep")
+			newData, err := grabPlayerInfo(repdata["winner"].(*screp.Player).Name)
 			if err != nil {
 				errorChannel <- err
 				time.Sleep(15 * time.Second)
@@ -74,6 +79,20 @@ func main() {
 		}
 	}()
 	myWindow.ShowAndRun()
+}
+
+func getReplayData(fileName string) map[string]interface{} {
+	cfg := repparser.Config{
+		Commands: true,
+		MapData:  true,
+	}
+	r, err := repparser.ParseFileConfig(fileName, cfg)
+	if err != nil {
+		fmt.Printf("Failed to parse replay: %v\n", err)
+		os.Exit(1)
+	}
+	var destination = os.Stdout
+	return compileReplayInfo(destination, r)
 }
 
 func grabPlayerInfo(player string) ([][]string, error) {
@@ -106,4 +125,43 @@ func grabPlayerInfo(player string) ([][]string, error) {
 			}
 		}
 	}
+}
+
+func compileReplayInfo(out *os.File, rep *screp.Replay) map[string]interface{} {
+	rep.Compute()
+	var winner, loser *screp.Player
+	winnerID := rep.Computed.WinnerTeam
+	hasWinner := (winnerID != 0)
+
+	for _, p := range rep.Header.Players {
+		if p.Team == winnerID {
+			winner = p
+		} else {
+			loser = p
+		}
+	}
+	if !hasWinner {
+		winner = rep.Header.Players[0]
+	}
+
+	engine := rep.Header.Engine.ShortName
+	if rep.Header.Version != "" {
+		engine = engine + " " + rep.Header.Version
+	}
+	mapName := rep.MapData.Name
+	if mapName == "" {
+		mapName = rep.Header.Map // But revert to Header.Map if the latter is not available.
+	}
+
+	d := rep.Header.Duration()
+
+	ctx := map[string]interface{}{
+		"winner":    winner,
+		"loser":     loser,
+		"len":       d.Truncate(time.Second).String(),
+		"map":       mapName,
+		"hasWinner": hasWinner,
+	}
+
+	return ctx
 }
