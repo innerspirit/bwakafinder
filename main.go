@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"image/color"
 	"io/ioutil"
@@ -22,7 +23,29 @@ import (
 var userHome, _ = os.UserHomeDir()
 var repPath = userHome + "\\Documents\\StarCraft\\Maps\\Replays"
 
+type Account struct {
+	Account string `json:"account"`
+}
+
+type Settings struct {
+	GatewayHistory []Account `json:"Gateway History"`
+}
+
 func main() {
+	var settings Settings
+	settingsFile, err := os.Open(userHome + "\\Documents\\StarCraft\\CSettings.json")
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		defer settingsFile.Close()
+		byteValue, _ := ioutil.ReadAll(settingsFile)
+		json.Unmarshal(byteValue, &settings)
+	}
+	var accounts []string
+	for _, account := range settings.GatewayHistory {
+		accounts = append(accounts, account.Account)
+	}
+
 	myApp := app.New()
 	myWindow := myApp.NewWindow("BW Aka Finder")
 
@@ -54,7 +77,13 @@ func main() {
 	go func() {
 		for {
 			repdata := getReplayData(repPath + "\\LastReplay.rep")
-			newData, err := grabPlayerInfo(repdata["winner"].(*screp.Player).Name)
+			var newData [][]string
+			var err error
+			if stringInSlice(repdata["winner"].(*screp.Player).Name, accounts) {
+				newData, err = grabPlayerInfo(repdata["loser"].(*screp.Player).Name)
+			} else {
+				newData, err = grabPlayerInfo(repdata["winner"].(*screp.Player).Name)
+			}
 			if err != nil {
 				errorChannel <- err
 				time.Sleep(15 * time.Second)
@@ -164,4 +193,13 @@ func compileReplayInfo(out *os.File, rep *screp.Replay) map[string]interface{} {
 	}
 
 	return ctx
+}
+
+func stringInSlice(str string, list []string) bool {
+	for _, v := range list {
+		if v == str {
+			return true
+		}
+	}
+	return false
 }
