@@ -31,6 +31,15 @@ type Settings struct {
 	GatewayHistory []Account `json:"Gateway History"`
 }
 
+type MMR struct {
+	MMR  int    `json:"highest_rating"`
+	Toon string `json:"toon"`
+}
+
+type MMGameLoadingRes struct {
+	MMStats []MMR `json:"matchmaked_stats"`
+}
+
 func main() {
 	var settings Settings
 	settingsFile, err := os.Open(userHome + "\\Documents\\StarCraft\\CSettings.json")
@@ -143,14 +152,37 @@ func grabPlayerInfo(player string) ([][]string, error) {
 		if err != nil {
 			return nil, err
 		} else {
-			_, readErr := ioutil.ReadAll(res.Body)
+			body, readErr := ioutil.ReadAll(res.Body)
 			if readErr != nil {
 				return nil, readErr
 			} else {
-				return [][]string{
+				var res MMGameLoadingRes
+				json.Unmarshal(body, &res)
+				response := [][]string{
 					{"AKA", "Max MMR", "Rank"},
-					{"NewData1", "NewData2", "NewData3"},
-				}, nil
+				}
+
+				for _, stat := range res.MMStats {
+					var rank string
+					switch {
+					case stat.MMR > 2471:
+						rank = "S"
+					case stat.MMR > 2015 && stat.MMR < 2470:
+						rank = "A"
+					case stat.MMR > 1698 && stat.MMR < 2014:
+						rank = "B"
+					case stat.MMR > 1549 && stat.MMR < 1697:
+						rank = "C"
+					case stat.MMR > 1427 && stat.MMR < 1548:
+						rank = "D"
+					case stat.MMR > 1137 && stat.MMR < 1426:
+						rank = "E"
+					default:
+						rank = "F"
+					}
+					response = append(response, []string{stat.Toon, fmt.Sprint(stat.MMR), rank})
+				}
+				return response, nil
 			}
 		}
 	}
