@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"io/ioutil"
+	"sort"
 
 	"net/http"
 	"os"
@@ -122,6 +123,9 @@ func main() {
 
 	go func() {
 		for newData := range dataChannel {
+			sort.SliceStable(newData, func(i, j int) bool {
+				return newData[i][1] > newData[j][1]
+			})
 			data = newData
 			myTable.Refresh()
 			errorLabel.Text = "" // clear error label when new data is successfully fetched
