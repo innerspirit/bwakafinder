@@ -67,18 +67,29 @@ func main() {
 			return len(data), len(data[0]) //rows, columns
 		},
 		func() fyne.CanvasObject {
-			return widget.NewLabel("Content") // basic cell template
+			item := widget.NewLabel("Content")
+			item.Resize(fyne.Size{
+				Width:  200,
+				Height: 20,
+			})
+			return item
 		},
-		func(i widget.TableCellID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(data[i.Row][i.Col]) // set content for cell
+		func(i widget.TableCellID, item fyne.CanvasObject) {
+			item.(*widget.Label).SetText(data[i.Row][i.Col])
+			item.(*widget.Label).Resize(fyne.Size{
+				Width:  200,
+				Height: 20,
+			})
 		},
 	)
 
-	bgColor := color.RGBA{20, 20, 20, 255}
 	errorLabel := canvas.NewText("", color.RGBA{255, 0, 0, 255}) // red color error label for displaying errors
 	errorLabel.TextStyle.Bold = true
-	myWindow.SetContent(container.NewMax(canvas.NewRectangle(bgColor), container.NewMax(myTable), errorLabel))
-	myWindow.Resize(fyne.NewSize(400, 400))
+	myTable.SetColumnWidth(0, 150)
+	myTable.SetColumnWidth(1, 150)
+	myTable.SetColumnWidth(2, 150)
+	myWindow.SetContent(container.NewMax(container.NewMax(myTable), errorLabel))
+	myWindow.Resize(fyne.NewSize(475, 400))
 
 	dataChannel := make(chan [][]string)
 	errorChannel := make(chan error)
@@ -86,20 +97,34 @@ func main() {
 	go func() {
 		for {
 			repdata := getReplayData(repPath + "\\LastReplay.rep")
-			var newData [][]string
+			var fullData [][]string
+			var servData [][]string
 			var err error
-			if stringInSlice(repdata["winner"].(*screp.Player).Name, accounts) {
-				newData, err = grabPlayerInfo(repdata["loser"].(*screp.Player).Name)
-			} else {
-				newData, err = grabPlayerInfo(repdata["winner"].(*screp.Player).Name)
+			servers := []string{"10", "11", "20", "30"}
+
+			for _, serv := range servers {
+				if stringInSlice(repdata["winner"].(*screp.Player).Name, accounts) {
+					servData, err = grabPlayerInfo(repdata["loser"].(*screp.Player).Name, serv)
+				} else {
+					servData, err = grabPlayerInfo(repdata["winner"].(*screp.Player).Name, serv)
+				}
+				fullData = append(fullData, servData[1:]...)
 			}
 			if err != nil {
 				errorChannel <- err
 				time.Sleep(15 * time.Second)
 				continue
 			}
-			dataChannel <- newData
+			dataChannel <- fullData
 			time.Sleep(15 * time.Second)
+		}
+	}()
+
+	go func() {
+		for newData := range dataChannel {
+			data = newData
+			myTable.Refresh()
+			errorLabel.Text = "" // clear error label when new data is successfully fetched
 		}
 	}()
 
@@ -133,11 +158,11 @@ func getReplayData(fileName string) map[string]interface{} {
 	return compileReplayInfo(destination, r)
 }
 
-func grabPlayerInfo(player string) ([][]string, error) {
+func grabPlayerInfo(player string, server string) ([][]string, error) {
 	_, port, err := lib.GetProcessInfo(false)
 	fmt.Println("sc port: ", port)
 	path := "aurora-profile-by-toon/"
-	params := "/30?request_flags=scr_mmgameloading"
+	params := fmt.Sprint("/", server, "?request_flags=scr_mmgameloading")
 	url := fmt.Sprint("http://localhost:", port, "/web-api/v2/", path, player, params)
 	fmt.Println(url)
 	req, err := http.NewRequest("GET", url, nil)
