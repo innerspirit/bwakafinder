@@ -1,3 +1,6 @@
+//go:build windows
+// +build windows
+
 package main
 
 import (
@@ -45,7 +48,6 @@ func main() {
 	var settings Settings
 	settingsFile, err := os.Open(userHome + "\\Documents\\StarCraft\\CSettings.json")
 	if err != nil {
-		fmt.Println(err)
 	} else {
 		defer settingsFile.Close()
 		byteValue, _ := ioutil.ReadAll(settingsFile)
@@ -58,6 +60,12 @@ func main() {
 
 	myApp := app.New()
 	myWindow := myApp.NewWindow("BW Aka Finder")
+
+	// Set window icon
+	icon, err := fyne.LoadResourceFromPath("icon.ico")
+	if err == nil {
+		myWindow.SetIcon(icon)
+	}
 
 	data := [][]string{
 		{"AKA", "Max MMR", "Rank"},
@@ -90,8 +98,13 @@ func main() {
 	myTable.SetColumnWidth(1, 150)
 	myTable.SetColumnWidth(2, 150)
 
-	// place the error label above the table so that it is always visible
-	content := container.NewBorder(errorLabel, nil, nil, nil, myTable)
+	// -------- Spinner shown while the table is loading --------
+	spinner := widget.NewProgressBarInfinite()
+	spinner.Hide() // hidden until we start a fresh load
+
+	// stack   error-label  +  spinner  at the top of the window
+	topBar  := container.NewVBox(errorLabel, spinner)
+	content := container.NewBorder(topBar, nil, nil, nil, myTable)
 	myWindow.SetContent(content)
 	myWindow.Resize(fyne.NewSize(475, 400))
 
@@ -104,18 +117,24 @@ func main() {
 
 	// click-to-sort handler
 	myTable.OnSelected = func(id widget.TableCellID) {
-		if id.Row != 0 { // only header row is clickable
+		if id.Row != 0 || len(data) <= 1 {      // only header row is clickable and need rows
 			return
 		}
 		if sortColumn == id.Col {
 			sortAsc = !sortAsc // toggle asc/desc
 		} else {
 			sortColumn = id.Col
-			sortAsc = true
+			// default DESC for MMR column, ASC for the others
+			if id.Col == 1 {
+				sortAsc = false
+			} else {
+				sortAsc = true
+			}
 		}
 
-		sort.SliceStable(data[1:], func(i, j int) bool {
-			vi, vj := data[i+1][sortColumn], data[j+1][sortColumn]
+		rows := data[1:]                       // work on a local slice
+		sort.SliceStable(rows, func(i, j int) bool {
+			vi, vj := rows[i][sortColumn], rows[j][sortColumn]
 			// numeric comparison for MMR, string otherwise
 			if sortColumn == 1 {
 				mi, _ := strconv.Atoi(vi)
@@ -133,11 +152,31 @@ func main() {
 		myTable.Refresh()
 	}
 
+	// remember the last time the replay file changed
+	var lastModTime time.Time
+
 	go func() {
 		for {
-			repdata, repErr := getReplayData(repPath + "\\LastReplay.rep")
+			repFile := repPath + "\\LastReplay.rep"
+
+			// --- skip work if the file is unchanged ---
+			if fi, fiErr := os.Stat(repFile); fiErr == nil {
+				if fi.ModTime().Equal(lastModTime) {
+					time.Sleep(5 * time.Second)
+					continue
+				}
+				lastModTime = fi.ModTime()
+			}
+
+			// Show spinner while we process the new file
+			spinner.Show()
+			spinner.Refresh()
+
+			repdata, repErr := getReplayData(repFile)
 			if repErr != nil {
 				errorChannel <- repErr
+				spinner.Hide()
+				spinner.Refresh()
 				time.Sleep(15 * time.Second)
 				continue
 			}
@@ -152,50 +191,138 @@ func main() {
 				} else {
 					servData, err = grabPlayerInfo(repdata["winner"].(*screp.Player).Name, serv)
 				}
-				fullData = append(fullData, servData[1:]...)
+
+				// Skip if error but don't fail the whole operation
+				if err != nil {
+					errorChannel <- fmt.Errorf("server %s: %v", serv, err)
+					continue
+				}
+
+				// Only add data if we have rows beyond header
+				if len(servData) > 1 {
+					fullData = append(fullData, servData[1:]...)
+				}
 			}
-			if err != nil {
-				errorChannel <- err
-				time.Sleep(15 * time.Second)
+
+			// If we got no data from any server, send an error
+			if len(fullData) == 0 {
+				errorChannel <- fmt.Errorf("no valid data received from any server")
 				continue
 			}
 
-			// --- make sure the header row is preserved ---
-			header := []string{"AKA", "Max MMR", "Rank"}
-			fullDataWithHeader := append([][]string{header}, fullData...)
-			dataChannel <- fullDataWithHeader
+			// --- de-duplicate, keeping highest MMR for each AKA ---
+			unique := map[string][]string{}
+			for _, row := range fullData {
+				if len(row) < 3 {               // ← ignore malformed rows
+					continue
+				}
+				aka    := row[0]
+				mmr, _ := strconv.Atoi(row[1])
+				if prev, ok := unique[aka]; !ok {
+					unique[aka] = row
+				} else {
+					prevMMR, _ := strconv.Atoi(prev[1])
+					if mmr > prevMMR {
+						unique[aka] = row
+					}
+				}
+			}
+			dedup := make([][]string, 0, len(unique))
+			for _, row := range unique {
+				dedup = append(dedup, row)
+			}
 
+			// prepend header
+			header := []string{"AKA", "Max MMR", "Rank"}
+			dataChannel <- append([][]string{header}, dedup...)
+
+			spinner.Hide()
+			spinner.Refresh()
 			time.Sleep(15 * time.Second)
 		}
 	}()
 
 	go func() {
 		for newData := range dataChannel {
-			// keep the last chosen sort order when fresh data arrives
-			data = append([][]string(nil), newData...) // copy
-			sort.SliceStable(data[1:], func(i, j int) bool {
-				vi, vj := data[i+1][sortColumn], data[j+1][sortColumn]
-				if sortColumn == 1 {
-					mi, _ := strconv.Atoi(vi)
-					mj, _ := strconv.Atoi(vj)
-					if sortAsc {
-						return mi < mj
+			// Process data in a completely defensive way
+			func() {
+				// Catch and recover from any panic
+				defer func() {
+					if r := recover(); r != nil {
 					}
-					return mi > mj
+				}()
+				
+				// Ensure we have at least one row (header)
+				if len(newData) == 0 {
+					return
 				}
-				if sortAsc {
-					return vi < vj
+				
+				// Make a safe copy of the data
+				localData := make([][]string, len(newData))
+				for i, row := range newData {
+					// Make sure each row has 3 columns
+					safeRow := make([]string, 3)
+					for j := 0; j < len(row) && j < 3; j++ {
+						safeRow[j] = row[j]
+					}
+					localData[i] = safeRow
 				}
-				return vi > vj
-			})
-			myTable.Refresh()
-			errorLabel.Text = "" // clear error label on success
+				
+				// Update the global data safely
+				data = localData
+				
+				// Only sort if we have data beyond the header
+				if len(localData) > 1 {
+					// Get the data rows only (skip header)
+					dataRows := localData[1:]
+					
+					// Sort the data rows
+					sort.SliceStable(dataRows, func(i, j int) bool {
+						// Default comparison values
+						vi, vj := "", ""
+						
+						// Safely get values for comparison
+						if sortColumn < len(dataRows[i]) {
+							vi = dataRows[i][sortColumn]
+						}
+						if sortColumn < len(dataRows[j]) {
+							vj = dataRows[j][sortColumn]
+						}
+						
+						// Use numeric comparison for MMR column
+						if sortColumn == 1 {
+							mi, _ := strconv.Atoi(vi)
+							mj, _ := strconv.Atoi(vj)
+							if sortAsc {
+								return mi < mj
+							}
+							return mi > mj
+						}
+						
+						// Use string comparison for other columns
+						if sortAsc {
+							return vi < vj
+						}
+						return vi > vj
+					})
+				}
+				
+				// Update the UI
+				myTable.Refresh()
+				errorLabel.Text = "" // clear error label on success
+				errorLabel.Refresh()
+			}()
 		}
 	}()
 
 	go func() {
 		for err := range errorChannel {
-			errorLabel.Text = err.Error() // display error message in label
+			// Make error messages more user-friendly
+			errorText := err.Error()
+			if errorText == "SC:R is not running or port not found" {
+				errorText = "StarCraft: Remastered is not running\nPlease launch the game first"
+			}
+			errorLabel.Text = errorText
 			errorLabel.Refresh()
 		}
 	}()
@@ -215,58 +342,65 @@ func getReplayData(fileName string) (map[string]interface{}, error) {
 }
 
 func grabPlayerInfo(player string, server string) ([][]string, error) {
-	_, port, err := lib.GetProcessInfo(false)
-	fmt.Println("sc port: ", port)
+	pid, port, err := lib.GetProcessInfo(false)
+	if err != nil {
+		showErrorDialog(fmt.Sprintf("SC process detection failed (pid:%d port:%d): %v", pid, port, err))
+		return nil, fmt.Errorf("SC process detection failed")
+	}
+	if port == -1 {
+		showErrorDialog("StarCraft: Remastered is not running\nPlease launch the game first")
+		return nil, fmt.Errorf("SC:R is not running")
+	}
+
 	path := "aurora-profile-by-toon/"
 	params := fmt.Sprint("/", server, "?request_flags=scr_mmgameloading")
 	url := fmt.Sprint("http://localhost:", port, "/web-api/v2/", path, player, params)
-	fmt.Println(url)
 	req, err := http.NewRequest("GET", url, nil)
-
-	if port == -1 {
-		return nil, fmt.Errorf("SC:R is not running")
-	}
 	if err != nil {
-		return nil, err
-	} else {
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, err
-		} else {
-			body, readErr := ioutil.ReadAll(res.Body)
-			if readErr != nil {
-				return nil, readErr
-			} else {
-				var res MMGameLoadingRes
-				json.Unmarshal(body, &res)
-				response := [][]string{
-					{"AKA", "Max MMR", "Rank"},
-				}
-
-				for _, stat := range res.MMStats {
-					var rank string
-					switch {
-					case stat.MMR > 2471:
-						rank = "S"
-					case stat.MMR > 2015 && stat.MMR < 2470:
-						rank = "A"
-					case stat.MMR > 1698 && stat.MMR < 2014:
-						rank = "B"
-					case stat.MMR > 1549 && stat.MMR < 1697:
-						rank = "C"
-					case stat.MMR > 1427 && stat.MMR < 1548:
-						rank = "D"
-					case stat.MMR > 1137 && stat.MMR < 1426:
-						rank = "E"
-					default:
-						rank = "F"
-					}
-					response = append(response, []string{stat.Toon, fmt.Sprint(stat.MMR), rank})
-				}
-				return response, nil
-			}
-		}
+		return nil, fmt.Errorf("failed to create request: %v", err)
 	}
+
+	httpRes, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %v", err)
+	}
+	defer httpRes.Body.Close()
+
+	body, err := ioutil.ReadAll(httpRes.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %v", err)
+	}
+
+	var apiRes MMGameLoadingRes
+	if err := json.Unmarshal(body, &apiRes); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	response := [][]string{
+		{"AKA", "Max MMR", "Rank"},
+	}
+
+	for _, stat := range apiRes.MMStats {
+		var rank string
+		switch {
+		case stat.MMR > 2471:
+			rank = "S"
+		case stat.MMR > 2015 && stat.MMR < 2470:
+			rank = "A"
+		case stat.MMR > 1698 && stat.MMR < 2014:
+			rank = "B"
+		case stat.MMR > 1549 && stat.MMR < 1697:
+			rank = "C"
+		case stat.MMR > 1427 && stat.MMR < 1548:
+			rank = "D"
+		case stat.MMR > 1137 && stat.MMR < 1426:
+			rank = "E"
+		default:
+			rank = "F"
+		}
+		response = append(response, []string{stat.Toon, fmt.Sprint(stat.MMR), rank})
+	}
+	return response, nil
 }
 
 func compileReplayInfo(out *os.File, rep *screp.Replay) map[string]interface{} {
@@ -315,4 +449,12 @@ func stringInSlice(str string, list []string) bool {
 		}
 	}
 	return false
+}
+
+func showErrorDialog(message string) {
+	// This will show a native Windows error dialog
+	fyne.CurrentApp().SendNotification(&fyne.Notification{
+		Title:   "Error", 
+		Content: message,
+	})
 }
