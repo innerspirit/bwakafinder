@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"image/color"
 	"io/ioutil"
-	"sort"
-
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -89,15 +89,58 @@ func main() {
 	myTable.SetColumnWidth(0, 150)
 	myTable.SetColumnWidth(1, 150)
 	myTable.SetColumnWidth(2, 150)
-	myWindow.SetContent(container.NewMax(container.NewMax(myTable), errorLabel))
+
+	// place the error label above the table so that it is always visible
+	content := container.NewBorder(errorLabel, nil, nil, nil, myTable)
+	myWindow.SetContent(content)
 	myWindow.Resize(fyne.NewSize(475, 400))
 
 	dataChannel := make(chan [][]string)
 	errorChannel := make(chan error)
 
+	// -------- Sorting helpers --------
+	sortColumn := 1     // default "Max MMR"
+	sortAsc := false    // default "highest first"
+
+	// click-to-sort handler
+	myTable.OnSelected = func(id widget.TableCellID) {
+		if id.Row != 0 { // only header row is clickable
+			return
+		}
+		if sortColumn == id.Col {
+			sortAsc = !sortAsc // toggle asc/desc
+		} else {
+			sortColumn = id.Col
+			sortAsc = true
+		}
+
+		sort.SliceStable(data[1:], func(i, j int) bool {
+			vi, vj := data[i+1][sortColumn], data[j+1][sortColumn]
+			// numeric comparison for MMR, string otherwise
+			if sortColumn == 1 {
+				mi, _ := strconv.Atoi(vi)
+				mj, _ := strconv.Atoi(vj)
+				if sortAsc {
+					return mi < mj
+				}
+				return mi > mj
+			}
+			if sortAsc {
+				return vi < vj
+			}
+			return vi > vj
+		})
+		myTable.Refresh()
+	}
+
 	go func() {
 		for {
-			repdata := getReplayData(repPath + "\\LastReplay.rep")
+			repdata, repErr := getReplayData(repPath + "\\LastReplay.rep")
+			if repErr != nil {
+				errorChannel <- repErr
+				time.Sleep(15 * time.Second)
+				continue
+			}
 			var fullData [][]string
 			var servData [][]string
 			var err error
@@ -116,50 +159,59 @@ func main() {
 				time.Sleep(15 * time.Second)
 				continue
 			}
-			dataChannel <- fullData
+
+			// --- make sure the header row is preserved ---
+			header := []string{"AKA", "Max MMR", "Rank"}
+			fullDataWithHeader := append([][]string{header}, fullData...)
+			dataChannel <- fullDataWithHeader
+
 			time.Sleep(15 * time.Second)
 		}
 	}()
 
 	go func() {
 		for newData := range dataChannel {
-			sort.SliceStable(newData, func(i, j int) bool {
-				return newData[i][1] > newData[j][1]
+			// keep the last chosen sort order when fresh data arrives
+			data = append([][]string(nil), newData...) // copy
+			sort.SliceStable(data[1:], func(i, j int) bool {
+				vi, vj := data[i+1][sortColumn], data[j+1][sortColumn]
+				if sortColumn == 1 {
+					mi, _ := strconv.Atoi(vi)
+					mj, _ := strconv.Atoi(vj)
+					if sortAsc {
+						return mi < mj
+					}
+					return mi > mj
+				}
+				if sortAsc {
+					return vi < vj
+				}
+				return vi > vj
 			})
-			data = newData
 			myTable.Refresh()
-			errorLabel.Text = "" // clear error label when new data is successfully fetched
-		}
-	}()
-
-	go func() {
-		for newData := range dataChannel {
-			data = newData
-			myTable.Refresh()
-			errorLabel.Text = "" // clear error label when new data is successfully fetched
+			errorLabel.Text = "" // clear error label on success
 		}
 	}()
 
 	go func() {
 		for err := range errorChannel {
 			errorLabel.Text = err.Error() // display error message in label
+			errorLabel.Refresh()
 		}
 	}()
 	myWindow.ShowAndRun()
 }
 
-func getReplayData(fileName string) map[string]interface{} {
+func getReplayData(fileName string) (map[string]interface{}, error) {
 	cfg := repparser.Config{
 		Commands: true,
 		MapData:  true,
 	}
 	r, err := repparser.ParseFileConfig(fileName, cfg)
 	if err != nil {
-		fmt.Printf("Failed to parse replay: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("failed to parse replay: %w", err)
 	}
-	var destination = os.Stdout
-	return compileReplayInfo(destination, r)
+	return compileReplayInfo(os.Stdout, r), nil
 }
 
 func grabPlayerInfo(player string, server string) ([][]string, error) {
