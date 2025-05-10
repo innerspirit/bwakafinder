@@ -174,12 +174,15 @@ func main() {
 
 			repdata, repErr := getReplayData(repFile)
 			if repErr != nil {
+				// On error, just clear the table and try again next time
+				dataChannel <- [][]string{{"AKA", "Max MMR", "Rank"}}
 				errorChannel <- repErr
 				spinner.Hide()
 				spinner.Refresh()
-				time.Sleep(15 * time.Second)
+				time.Sleep(5 * time.Second)
 				continue
 			}
+
 			var fullData [][]string
 			var servData [][]string
 			var err error
@@ -204,8 +207,9 @@ func main() {
 				}
 			}
 
-			// If we got no data from any server, send an error
+			// If we got no data from any server, send just the header
 			if len(fullData) == 0 {
+				dataChannel <- [][]string{{"AKA", "Max MMR", "Rank"}}
 				errorChannel <- fmt.Errorf("no valid data received from any server")
 				continue
 			}
@@ -238,7 +242,7 @@ func main() {
 
 			spinner.Hide()
 			spinner.Refresh()
-			time.Sleep(15 * time.Second)
+			time.Sleep(5 * time.Second) // Reduced from 15 to 5 seconds for faster retries
 		}
 	}()
 

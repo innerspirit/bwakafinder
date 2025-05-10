@@ -1,0 +1,26 @@
+{
+    "RT_MANIFEST": {
+        "APP_MANIFEST": {
+            "execution-level": "as-invoker",
+            "ui-access": false,
+            "auto-elevate": false,
+            "dpi-awareness": "system"
+        }
+    },
+    "RT_GROUP_ICON": {
+        "APP_ICON": {
+            "icon-path": "icon.ico"
+        }
+    },
+    "RT_VERSION": {
+        "APP_VERSION": {
+            "CompanyName": "BW Aka Finder",
+            "FileDescription": "BW Aka Finder",
+            "FileVersion": "1.0.0",
+            "LegalCopyright": "© 2023",
+            "OriginalFilename": "bwakafinder.exe",
+            "ProductName": "BW Aka Finder",
+            "ProductVersion": "1.0.0"
+        }
+    }
+} 
