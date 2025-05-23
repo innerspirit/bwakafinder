@@ -1,0 +1,8 @@
+- can you add a progress o spinner or something at the top when the akas are loading? (only when there's a change in the file)
+- don't load the list again if the file is the same as last time
+- also stop printing the url and port in the console
+- if the same resulting ID is repeated, keep only the one with the highest MMR out of the duplicates
+- headers seem to be missing
+- make the middle column (mmr) sort descending
+- if the data loading fails, dont try again until the next timer cycle
+- clear the table if theres nothing to show
