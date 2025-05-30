@@ -86,7 +86,7 @@ func (f FuturisticTheme) Size(name fyne.ThemeSizeName) float32 {
 func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 	myApp := app.New()
 	myApp.Settings().SetTheme(&FuturisticTheme{})
-	
+
 	myWindow := myApp.NewWindow("BW AKA FINDER")
 
 	// optional icon
@@ -109,14 +109,14 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 		func(id widget.TableCellID, obj fyne.CanvasObject) {
 			label := obj.(*widget.Label)
 			text := data[id.Row][id.Col]
-			
+
 			// Plain-ASCII header + data
 			label.SetText(text)
 			label.TextStyle = fyne.TextStyle{Bold: id.Row == 0}
 			label.Resize(fyne.NewSize(220, 35))
 		},
 	)
-	
+
 	// Set larger column widths for the futuristic look
 	table.SetColumnWidth(0, 180)
 	table.SetColumnWidth(1, 160)
@@ -138,7 +138,7 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 
 	// Layout with futuristic spacing — only show errors at top now
 	topBar := container.NewVBox(errLabel)
-	
+
 	// Overlay the spinner centered on top of the table + border
 	tableContainer := container.NewMax(
 		tableBorder,
@@ -146,7 +146,7 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 		container.NewCenter(spinner),
 	)
 	content := container.NewBorder(topBar, nil, nil, nil, tableContainer)
-	
+
 	myWindow.SetContent(content)
 	myWindow.Resize(fyne.NewSize(580, 500))
 
@@ -271,4 +271,4 @@ func showErrorDialog(message string) {
 		Title:   "⚠ SYSTEM ALERT",
 		Content: "⚠ " + message,
 	})
-} 
+}
