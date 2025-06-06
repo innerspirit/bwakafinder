@@ -4,8 +4,8 @@ tmp_dir = "tmp"
 
 [build]
   args_bin = []
-  bin = "bwakafinder.exe"
-  cmd = "go build -o ./bwakafinder.exe ."
+  bin = "./bwakafinder.exe"
+  cmd = "go build -tags=windows -o ./bwakafinder.exe ."
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata"]
   exclude_file = []

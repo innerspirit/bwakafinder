@@ -13,6 +13,13 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+// Add this constant at the top of the file
+const (
+	HeaderAKA    = "AKA"
+	HeaderMaxMMR = "Max MMR"
+	HeaderRank   = "Rank"
+)
+
 // FuturisticTheme creates a dark, futuristic theme
 type FuturisticTheme struct{}
 
@@ -35,7 +42,7 @@ func (f FuturisticTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVaria
 	case theme.ColorNameSelection:
 		return color.RGBA{0, 100, 150, 80} // Softer, lower-contrast selection
 	case theme.ColorNameSeparator:
-		return color.RGBA{0, 100, 150, 255} // Blue separator
+		return color.RGBA{0, 0, 0, 0} // Transparent
 	case theme.ColorNameShadow:
 		return color.RGBA{0, 0, 0, 100}
 	case theme.ColorNameInputBackground:
@@ -84,7 +91,7 @@ func (f FuturisticTheme) Size(name fyne.ThemeSizeName) float32 {
 // sets up sorting, and starts the two goroutines that
 // read from dataCh / errCh to update UI.
 func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
-	myApp := app.New()
+	myApp := app.NewWithID("com.innerspirit.bwakafinder")
 	myApp.Settings().SetTheme(&FuturisticTheme{})
 
 	myWindow := myApp.NewWindow("BW AKA FINDER")
@@ -94,8 +101,21 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 		myWindow.SetIcon(icon)
 	}
 
+	// Load saved window position and size
+	prefs := myApp.Preferences()
+	winWidth := prefs.FloatWithFallback("window.width", 580)
+	winHeight := prefs.FloatWithFallback("window.height", 500)
+	myWindow.Resize(fyne.NewSize(float32(winWidth), float32(winHeight)))
+
+	// Save window position and size on close
+	myWindow.SetCloseIntercept(func() {
+		prefs.SetFloat("window.width", float64(myWindow.Canvas().Size().Width))
+		prefs.SetFloat("window.height", float64(myWindow.Canvas().Size().Height))
+		myWindow.Close()
+	})
+
 	// initial table data
-	data := [][]string{{"AKA", "Max MMR", "Rank"}}
+	data := [][]string{{HeaderAKA, HeaderMaxMMR, HeaderRank}}
 
 	// Create a custom table with futuristic styling
 	table := widget.NewTable(
@@ -148,7 +168,6 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 	content := container.NewBorder(topBar, nil, nil, nil, tableContainer)
 
 	myWindow.SetContent(content)
-	myWindow.Resize(fyne.NewSize(580, 500))
 
 	// sorting state
 	sortCol := 1
@@ -231,8 +250,11 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 				}
 
 				table.Refresh()
-				errLabel.Text = ""
-				errLabel.Refresh()
+				// Only clear error when we have valid data
+				if len(newData) > 1 {
+					errLabel.Text = ""
+					errLabel.Refresh()
+				}
 				// hide our "spinner" once fresh data arrives
 				spinner.Hide()
 			}()
@@ -243,18 +265,15 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 	go func() {
 		for e := range errCh {
 			if e == nil {
-				// clear previous error
-				errLabel.Text = ""
-				errLabel.Refresh()
 				// show spinner while scanning
 				spinner.Show()
 				continue
 			}
 			txt := e.Error()
 			if txt == "SC:R is not running or port not found" {
-				txt = "⚠ STARCRAFT: REMASTERED NOT DETECTED\n⚠ PLEASE LAUNCH THE GAME FIRST"
+				txt = "STARCRAFT: REMASTERED NOT DETECTED\nPLEASE LAUNCH THE GAME FIRST"
 			} else {
-				txt = "⚠ ERROR: " + txt
+				txt = "ERROR: " + txt
 			}
 			errLabel.Text = txt
 			errLabel.Refresh()
@@ -268,7 +287,7 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 // showErrorDialog is called by grabPlayerInfo to pop up a native notification.
 func showErrorDialog(message string) {
 	fyne.CurrentApp().SendNotification(&fyne.Notification{
-		Title:   "⚠ SYSTEM ALERT",
-		Content: "⚠ " + message,
+		Title:   "SYSTEM ALERT",
+		Content: message,
 	})
 }
