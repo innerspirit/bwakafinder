@@ -21,7 +21,6 @@ type Settings struct {
 }
 
 func main() {
-	// --- load settings ---
 	var settings Settings
 	settingsFilePath := userHome + "\\Documents\\StarCraft\\CSettings.json"
 	if f, err := os.Open(settingsFilePath); err == nil {
@@ -31,17 +30,14 @@ func main() {
 		}
 	}
 
-	// --- build account list ---
 	var accounts []string
 	for _, acct := range settings.GatewayHistory {
 		accounts = append(accounts, acct.Account)
 	}
 
-	// --- channels for UI ↔ data goroutines ---
 	dataCh := make(chan [][]string)
 	errCh := make(chan error)
 
-	// --- build & show the UI, then start data processing ---
 	myWindow := NewUI(dataCh, errCh)
 
 	// main does not need its own close intercept; handled in UI builder
