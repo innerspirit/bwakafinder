@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	screp "github.com/icza/screp/rep"
@@ -23,6 +24,9 @@ type MMGameLoadingRes struct {
 	MMStats []MMR `json:"matchmaked_stats"`
 }
 
+// Define a sentinel error for when a player is not found
+var ErrPlayerNotFound = fmt.Errorf("player not found")
+
 // StartDataProcessing kicks off your file‐watch/parse loop
 // and pushes table‐rows or errors into the provided channels.
 func StartDataProcessing(repPath string, accounts []string, dataCh chan [][]string, errCh chan error) {
@@ -32,16 +36,23 @@ func StartDataProcessing(repPath string, accounts []string, dataCh chan [][]stri
 	go func() {
 		var lastMod time.Time
 		servers := []string{"10", "11", "20", "30"}
+		gameNotRunning := false // Track if the last error was game not running
 
 		for {
 			repFile := repPath + "\\LastReplay.rep"
 
-			if fi, err := os.Stat(repFile); err == nil {
-				if fi.ModTime().Equal(lastMod) {
-					time.Sleep(5 * time.Second)
-					continue
+			// Only check file modification time if the game was running last time
+			if !gameNotRunning {
+				if fi, err := os.Stat(repFile); err == nil {
+					if fi.ModTime().Equal(lastMod) {
+						time.Sleep(5 * time.Second)
+						continue
+					}
+					lastMod = fi.ModTime()
 				}
-				lastMod = fi.ModTime()
+			} else {
+				// If game was not running, sleep briefly before retrying
+				time.Sleep(5 * time.Second)
 			}
 
 			// show spinner
@@ -50,11 +61,24 @@ func StartDataProcessing(repPath string, accounts []string, dataCh chan [][]stri
 			if err != nil {
 				dataCh <- [][]string{TableHeader}
 				errCh <- err
-				time.Sleep(5 * time.Second)
+
+				// Update gameNotRunning status based on the error
+				gameNotRunning = isGameNotRunningError(err)
+
+				// If it's not the game not running error, we still want a delay
+				if !gameNotRunning {
+					time.Sleep(5 * time.Second)
+				}
+
 				continue
 			}
 
+			// If we successfully got data, reset gameNotRunning status
+			gameNotRunning = false
+
 			var full [][]string
+			var serverErrors []error // Keep track of errors per server
+
 			for _, serv := range servers {
 				var (
 					rows [][]string
@@ -68,20 +92,50 @@ func StartDataProcessing(repPath string, accounts []string, dataCh chan [][]stri
 					rows, e = grabPlayerInfo(win, serv)
 				}
 				if e != nil {
-					errCh <- fmt.Errorf("server %s: %v", serv, e)
-					continue
+					// Don't immediately continue on error, just record it
+					serverErrors = append(serverErrors, fmt.Errorf("server %s: %v", serv, e))
+					continue // Skip this server, but continue to the next
 				}
 				if len(rows) > 1 {
 					full = append(full, rows[1:]...)
 				}
 			}
 
+			// Check if we got any data from any server
+			var errToReport error
 			if len(full) == 0 {
+				// If no data, report the last server error if available, otherwise a generic error
+				if len(serverErrors) > 0 {
+					errToReport = serverErrors[len(serverErrors)-1]
+					// Strip the "server XX: " prefix if it exists
+					errorString := errToReport.Error()
+					prefix := "server "
+					if strings.HasPrefix(errorString, prefix) {
+						colonIndex := strings.Index(errorString, ": ")
+						if colonIndex != -1 {
+							errToReport = fmt.Errorf(errorString[colonIndex+2:])
+						}
+					}
+				} else {
+					errToReport = fmt.Errorf("no valid data received from any server")
+				}
+
+				errCh <- errToReport
 				dataCh <- [][]string{TableHeader}
-				errCh <- fmt.Errorf("no valid data received from any server")
-				time.Sleep(5 * time.Second)
-				continue
+
+				// Update gameNotRunning status based on the error reported
+				gameNotRunning = isGameNotRunningError(errToReport)
+
+				// Only sleep and continue if there was no persistent game error reported in this section
+				if !gameNotRunning {
+					time.Sleep(5 * time.Second)
+				}
+
+				continue // Continue the main loop
 			}
+
+			// If we successfully got data, clear gameNotRunning status
+			gameNotRunning = false
 
 			// dedupe highest MMR
 			uniq := map[string][]string{}
@@ -107,6 +161,9 @@ func StartDataProcessing(repPath string, accounts []string, dataCh chan [][]stri
 			// prepend header
 			header := TableHeader
 			dataCh <- append([][]string{header}, dedup...)
+
+			// Clear any previous errors if data was successfully processed
+			errCh <- nil
 
 			time.Sleep(5 * time.Second)
 		}
@@ -152,6 +209,11 @@ func grabPlayerInfo(player, server string) ([][]string, error) {
 	var apiRes MMGameLoadingRes
 	if err := json.Unmarshal(body, &apiRes); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	// Check if no stats were returned, indicating player not found
+	if len(apiRes.MMStats) == 0 {
+		return nil, ErrPlayerNotFound
 	}
 
 	out := [][]string{TableHeader}
@@ -217,4 +279,13 @@ func stringInSlice(s string, list []string) bool {
 		}
 	}
 	return false
+}
+
+// Helper function to check if an error indicates the game is not running
+func isGameNotRunningError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check if the error string contains the specific message from grabPlayerInfo
+	return strings.Contains(err.Error(), "SC:R is not running or port not found")
 }

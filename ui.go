@@ -277,7 +277,7 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 				}
 				txt := e.Error()
 				if txt == "SC:R is not running or port not found" {
-					txt = "STARCRAFT: REMASTERED NOT DETECTED\nPLEASE LAUNCH THE GAME FIRST"
+					txt = "STARCRAFT NOT DETECTED, PLEASE LAUNCH THE GAME FIRST"
 				} else {
 					txt = "ERROR: " + txt
 				}
