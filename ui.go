@@ -105,6 +105,7 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 	prefs := myApp.Preferences()
 	winWidth := prefs.FloatWithFallback("window.width", 580)
 	winHeight := prefs.FloatWithFallback("window.height", 500)
+
 	myWindow.Resize(fyne.NewSize(float32(winWidth), float32(winHeight)))
 
 	// Save window position and size on close
@@ -249,14 +250,17 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 					})
 				}
 
-				table.Refresh()
-				// Only clear error when we have valid data
-				if len(newData) > 1 {
-					errLabel.Text = ""
-					errLabel.Refresh()
-				}
-				// hide our "spinner" once fresh data arrives
-				spinner.Hide()
+				// Update UI on the main thread
+				fyne.Do(func() {
+					table.Refresh()
+					// Only clear error when we have valid data
+					if len(newData) > 1 {
+						errLabel.Text = ""
+						errLabel.Refresh()
+					}
+					// hide our "spinner" once fresh data arrives
+					spinner.Hide()
+				})
 			}()
 		}
 	}()
@@ -264,20 +268,23 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 	// consume errors
 	go func() {
 		for e := range errCh {
-			if e == nil {
-				// show spinner while scanning
-				spinner.Show()
-				continue
-			}
-			txt := e.Error()
-			if txt == "SC:R is not running or port not found" {
-				txt = "STARCRAFT: REMASTERED NOT DETECTED\nPLEASE LAUNCH THE GAME FIRST"
-			} else {
-				txt = "ERROR: " + txt
-			}
-			errLabel.Text = txt
-			errLabel.Refresh()
-			spinner.Hide()
+			// Update UI on the main thread
+			fyne.Do(func() {
+				if e == nil {
+					// show spinner while scanning
+					spinner.Show()
+					return
+				}
+				txt := e.Error()
+				if txt == "SC:R is not running or port not found" {
+					txt = "STARCRAFT: REMASTERED NOT DETECTED\nPLEASE LAUNCH THE GAME FIRST"
+				} else {
+					txt = "ERROR: " + txt
+				}
+				errLabel.Text = txt
+				errLabel.Refresh()
+				spinner.Hide()
+			})
 		}
 	}()
 

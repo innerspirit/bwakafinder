@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"os"
-
-	"fyne.io/fyne/v2"
 )
 
 var userHome, _ = os.UserHomeDir()
@@ -46,20 +44,7 @@ func main() {
 	// --- build & show the UI, then start data processing ---
 	myWindow := NewUI(dataCh, errCh)
 
-	// Save window position on close
-	myWindow.SetCloseIntercept(func() {
-		prefs := fyne.CurrentApp().Preferences()
-		pos := myWindow.Position()
-		prefs.SetFloat("window.x", float64(pos.X))
-		prefs.SetFloat("window.y", float64(pos.Y))
-		myWindow.Close()
-	})
-
-	// Set initial position
-	prefs := fyne.CurrentApp().Preferences()
-	x := prefs.FloatWithFallback("window.x", 100)
-	y := prefs.FloatWithFallback("window.y", 100)
-	myWindow.Move(fyne.NewPos(float32(x), float32(y)))
+	// main does not need its own close intercept; handled in UI builder
 
 	StartDataProcessing(repPath, accounts, dataCh, errCh)
 	myWindow.ShowAndRun()
