@@ -19,25 +19,16 @@ A Windows application for StarCraft: Remastered players to identify opponents' a
 
 ### Build Process
 
-1. Open PowerShell in the project directory
-2. Run the build script:
-   ```powershell
-   .\build.ps1
-   ```
+Run the PowerShell build script:
+```powershell
+.\build.ps1
+```
 
-This will create a standalone executable in the `dist` directory that contains all dependencies.
+This creates a standalone executable in the `dist` directory with all dependencies included.
 
-### Manual Build
-
-If you prefer to build manually:
-
+For manual builds:
 ```bash
-# Set environment variables for Windows build
-$env:GOOS="windows"
-$env:GOARCH="amd64"
-
-# Build with embedded resources
-go build -ldflags "-s -w" -tags=windows -o bwakafinder.exe .
+go build -tags=windows -o bwakafinder.exe .
 ```
 
 ## Usage
@@ -54,6 +45,24 @@ go build -ldflags "-s -w" -tags=windows -o bwakafinder.exe .
 3. It determines which player is the local user based on account history
 4. It queries the StarCraft: Remastered web API to find the opponent's alternate accounts
 5. It displays the highest MMR and corresponding rank for each AKA found
+## GitHub Release Process
+
+This project includes a GitHub Actions workflow that automatically builds and creates releases when you push a tag.
+
+### Creating a Release
+
+1. Create a new tag:
+   ```bash
+   git tag -a v1.0.0 -m "Release version 1.0.0"
+   git push origin v1.0.0
+   ```
+
+2. The workflow will:
+   - Build the Windows executable
+   - Create a draft release with the executable
+   - Generate release notes
+
+3. Edit and publish the draft release on GitHub.
 
 ## Dependencies
 
