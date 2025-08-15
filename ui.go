@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"image/color"
 	"sort"
 	"strconv"
@@ -12,6 +13,9 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
+
+//go:embed icon.ico
+var iconFS embed.FS
 
 const (
 	HeaderAKA    = "AKA"
@@ -91,8 +95,10 @@ func NewUI(dataCh chan [][]string, errCh chan error) fyne.Window {
 
 	myWindow := myApp.NewWindow("BW AKA FINDER")
 
-	if icon, err := fyne.LoadResourceFromPath("icon.ico"); err == nil {
-		myWindow.SetIcon(icon)
+	// Load embedded icon
+	if iconData, err := iconFS.ReadFile("icon.ico"); err == nil {
+		iconRes := fyne.NewStaticResource("icon.ico", iconData)
+		myWindow.SetIcon(iconRes)
 	}
 
 	prefs := myApp.Preferences()
